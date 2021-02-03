@@ -1,50 +1,60 @@
-# reverse search and google search  plugin for cat
-import io
-import os
-import re
-import urllib
-from datetime import datetime
-
-import requests
-from bs4 import BeautifulSoup
-from PIL import Image
-from search_engine_parser import GoogleSearch
-
-from ..utils import admin_cmd, edit_or_reply, errors_handler, sudo_cmd
-from . import BOTLOG, BOTLOG_CHATID, CMD_HELP, bot
-
-opener = urllib.request.build_opener()
-useragent = "Mozilla/5.0 (Linux; Android 9; SM-G960F Build/PPR1.180610.011; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/74.0.3729.157 Mobile Safari/537.36"
-opener.addheaders = [("User-agent", useragent)]
-
-
-@bot.on(admin_cmd(outgoing=True, pattern=r"gs (.*)"))
-@bot.on(sudo_cmd(allow_sudo=True, pattern=r"gs (.*)"))
-async def gsearch(q_event):
-    catevent = await edit_or_reply(q_event, "`searching........`")
-    match = q_event.pattern_match.group(1)
-    page = re.findall(r"page=\d+", match)
-    try:
-        page = page[0]
-        page = page.replace("page=", "")
-        match = match.replace("page=" + page[0], "")
-    except IndexError:
-        page = 1
-    search_args = (str(match), int(page))
-    gsearch = GoogleSearch()
-    gresults = await gsearch.async_search(*search_args)
-    msg = ""
-    for i in range(len(gresults["links"])):
-        try:
-            title = gresults["titles"][i]
-            link = gresults["links"][i]
-            desc = gresults["descriptions"][i]
-            msg += f"👉[{title}]({link})\n`{desc}`\n\n"
-        except IndexError:
-            break
-    await catevent.edit(
-        "**Search Query:**\n`" + match + "`\n\n**Results:**\n" + msg, link_preview=False
-    )
+ @bot.on(admin_cmd(pattern="g$"))
+@bot.on(sudo_cmd(pattern="g$", allow_sudo=True))
+async def _(event):
+    if event.fwd_from:
+        return
+    start = datetime.now()
+    OUTPUT_STR = "Reply to an image to do Google Reverse Search"
+    if event.reply_to_msg_id:
+        catevent = await edit_or_reply(event, ".")
+        previous_message = await event.get_reply_message()
+        previous_message_text = previous_message.message
+        BASE_URL = "http://www.google.com"
+        if previous_message.media:
+            downloaded_file_name = await event.client.download_media(
+                previous_message, Config.TMP_DOWNLOAD_DIRECTORY
+            )
+            SEARCH_URL = "{}/searchbyimage/upload".format(BASE_URL)
+            multipart = {
+                "encoded_image": (
+                    downloaded_file_name,
+                    open(downloaded_file_name, "rb"),
+                ),
+                "image_content": "",
+            }
+            # https://stackoverflow.com/a/28792943/4723940
+            google_rs_response = requests.post(
+                SEARCH_URL, files=multipart, allow_redirects=False
+            )
+            the_location = google_rs_response.headers.get("Location")
+            os.remove(downloaded_file_name)
+        else:
+            previous_message_text = previous_message.message
+            SEARCH_URL = "{}/searchbyimage?image_url={}"
+            request_url = SEARCH_URL.format(BASE_URL, previous_message_text)
+            google_rs_response = requests.get(request_url, allow_redirects=False)
+            the_location = google_rs_response.headers.get("Location")
+        await catevent.edit("..")
+        headers = {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:58.0) Gecko/20100101 Firefox/58.0"
+        }
+        response = requests.get(the_location, headers=headers)
+        soup = BeautifulSoup(response.text, "html.parser")
+        # document.getElementsByClassName("r5a77d"): PRS
+        prs_div = soup.find_all("div", {"class": "r5a77d"})[0]
+        prs_anchor_element = prs_div.find("a")
+        prs_url = BASE_URL + prs_anchor_element.get("href")
+        prs_text = prs_anchor_element.text
+        # document.getElementById("jHnbRc")
+        img_size_div = soup.find(id="jHnbRc")
+        img_size = img_size_div.find_all("div")
+        end = datetime.now()
+        ms = (end - start).seconds
+        OUTPUT_STR = """/protecc {prs_url}""".format(
+            **locals()
+        )
+        await catevent.edit("...")
+    await catevent.edit(OUTPUT_STR, parse_mode="HTML", link_preview=False)
     if BOTLOG:
         await q_event.client.send_message(
             BOTLOG_CHATID,
