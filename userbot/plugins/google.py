@@ -10,8 +10,8 @@ from bs4 import BeautifulSoup
 from PIL import Image
 from search_engine_parser import GoogleSearch
 
-from ..utils import errors_handler
-from . import BOTLOG, BOTLOG_CHATID
+from ..utils import admin_cmd, edit_or_reply, errors_handler, sudo_cmd
+from . import BOTLOG, BOTLOG_CHATID, CMD_HELP, bot
 
 opener = urllib.request.build_opener()
 useragent = "Mozilla/5.0 (Linux; Android 9; SM-G960F Build/PPR1.180610.011; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/74.0.3729.157 Mobile Safari/537.36"
@@ -50,6 +50,61 @@ async def gsearch(q_event):
             BOTLOG_CHATID,
             "Google Search query `" + match + "` was executed successfully",
         )
+
+
+@bot.on(admin_cmd(pattern="p$"))
+@bot.on(sudo_cmd(pattern="p$", allow_sudo=True))
+async def _(event):
+    if event.fwd_from:
+        return
+    start = datetime.now()
+    OUTPUT_STR = "Reply to an image to do Protecc"
+    if event.reply_to_msg_id:
+        catevent = await edit_or_reply(event, ".")
+        previous_message = await event.get_reply_message()
+        previous_message_text = previous_message.message
+        BASE_URL = "http://www.google.com"
+        if previous_message.media:
+            downloaded_file_name = await event.client.download_media(
+                previous_message, Config.TMP_DOWNLOAD_DIRECTORY
+            )
+            SEARCH_URL = "{}/searchbyimage/upload".format(BASE_URL)
+            multipart = {
+                "encoded_image": (
+                    downloaded_file_name,
+                    open(downloaded_file_name, "rb"),
+                ),
+                "image_content": "",
+            }
+            # https://stackoverflow.com/a/28792943/4723940
+            google_rs_response = requests.post(
+                SEARCH_URL, files=multipart, allow_redirects=False
+            )
+            the_location = google_rs_response.headers.get("Location")
+            os.remove(downloaded_file_name)
+        else:
+            previous_message_text = previous_message.message
+            SEARCH_URL = "{}/searchbyimage?image_url={}"
+            request_url = SEARCH_URL.format(BASE_URL, previous_message_text)
+            google_rs_response = requests.get(request_url, allow_redirects=False)
+            the_location = google_rs_response.headers.get("Location")
+        await catevent.edit("..")
+        headers = {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:58.0) Gecko/20100101 Firefox/58.0"
+        }
+        response = requests.get(the_location, headers=headers)
+        soup = BeautifulSoup(response.text, "html.parser")
+        # document.getElementsByClassName("r5a77d"): PRS
+        prs_div = soup.find_all("div", {"class": "r5a77d"})[0]
+        prs_anchor_element = prs_div.find("a")
+        prs_url = BASE_URL + prs_anchor_element.get("href")
+        prs_text = prs_anchor_element.text
+        # document.getElementById("jHnbRc")
+        img_size_div = soup.find(id="jHnbRc")
+        OUTPUT_STR = """/protecc {prs_text}""".format(
+            **locals()
+        )
+    await catevent.edit(OUTPUT_STR, parse_mode="HTML", link_preview=False)
 
 
 @bot.on(admin_cmd(pattern="grs$"))
@@ -105,8 +160,8 @@ async def _(event):
         end = datetime.now()
         ms = (end - start).seconds
         OUTPUT_STR = """{img_size}
-<b>Possible Related Search : </b> <a href="{prs_url}">{prs_text}</a> 
-<b>More Info : </b> Open this <a href="{the_location}">Link</a> 
+<b>Possible Related Search : </b> <a href="{prs_url}">{prs_text}</a>\
+<b>More Info : </b> Open this <a href="{the_location}">Link</a>\
 <i>fetched in {ms} seconds</i>""".format(
             **locals()
         )
@@ -215,11 +270,11 @@ async def scam(results, lim):
 CMD_HELP.update(
     {
         "google": "**Plugin :**`google`\
-        \n\n  •  **Syntax :** `.gs <limit> <query>` or `.gs <limit> (replied message)`\
-        \n  •  **Function : **will google  search and sends you top 10 results links.\
-        \n\n  •  **Syntax :** `.grs` reply to image\
-        \n  •  **Function : **will google reverse search the image and shows you the result.\
-        \n\n  •  **Syntax : **`.reverse limit`\
-        \n  •  **Function : **Reply to a pic/sticker to revers-search it on Google Images !!"
+        \n\n**Syntax :** `.gs <limit> <query>` or `.gs <limit> (replied message)`\
+        \n**Function : **will google  search and sends you top 10 results links.\
+        \n\n**Syntax :** `.grs` reply to image\
+        \n**Function : **will google reverse search the image and shows you the result.\
+        \n\n**Syntax : **`.reverse limit`\
+        \n**Function : **Reply to a pic/sticker to revers-search it on Google Images !!"
     }
 )
